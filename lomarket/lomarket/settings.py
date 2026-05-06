@@ -78,6 +78,7 @@ REST_FRAMEWORK = {
 
 MIDDLEWARE = (
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -85,8 +86,6 @@ MIDDLEWARE = (
 
     # Add the account middleware:
     "allauth.account.middleware.AccountMiddleware",
-
-    "corsheaders.middleware.CorsMiddleware",
 )
 CORS_ALLOW_ALL_ORIGINS = True
 
@@ -118,12 +117,13 @@ DATABASES = {
         'ENGINE': 'django.db.backends.mysql', 
         'NAME': 'lomarket',
         'USER': 'root',
-        'PASSWORD': '',
-        'HOST': 'localhost',
-        'PORT': '',
+        'PASSWORD': 'nguyenminhtri',
+        'HOST': 'db',
+        'PORT': '3306',
     }
 }
 
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
