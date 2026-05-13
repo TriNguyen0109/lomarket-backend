@@ -2,17 +2,22 @@ from django.http import Http404
 from django.shortcuts import get_object_or_404
 from django.db.models import Q
 from django.contrib.auth.models import User
-from rest_framework import generics, status
+from django.conf import settings
+from django.core.files.storage import default_storage
+from django.utils.text import get_valid_filename
+from rest_framework import generics, serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.renderers import JSONRenderer
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 
-from members.models import FriendRequest, Follow, Product
+from members.models import FriendRequest, Follow, Order, Product, UserProfile
 from members.serializers import (
     FriendRequestSerializer,
     UserSerializer,
     FollowSerializer,
+    OrderSerializer,
     ProductSerializer,
 )
 
@@ -201,6 +206,141 @@ class FollowedProductsAPIView(APIView):
 
     def get(self, request):
         following = Follow.objects.filter(follower=request.user).values_list('followed', flat=True)
-        products = Product.objects.filter(user_id__in=following)
+        products = Product.objects.filter(user_id__in=following).exclude(
+            orders__status__in=[Order.STATUS_PENDING, Order.STATUS_SOLD]
+        ).select_related('user', 'user__profile').distinct()
         serializer = ProductSerializer(products, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class ProductListCreateAPIView(generics.ListCreateAPIView):
+    serializer_class = ProductSerializer
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def get_queryset(self):
+        return Product.objects.select_related('user', 'user__profile').all()
+
+    def create(self, request, *args, **kwargs):
+        data = request.data.copy()
+        image = request.FILES.get('image')
+
+        if image:
+            try:
+                filename = get_valid_filename(image.name or 'product.jpg')
+                saved_path = default_storage.save(f'products/{filename}', image)
+                # Use API_DOMAIN instead of request.build_absolute_uri()
+                image_url = f"{settings.API_DOMAIN}{settings.MEDIA_URL}{saved_path}"
+                print(f"DEBUG: Image saved to {saved_path}")
+                print(f"DEBUG: Image URL = {image_url}")
+                data['image'] = image_url
+            except Exception as e:
+                print(f"DEBUG: Image save failed: {str(e)}")
+                return Response(
+                    {'error': f'Failed to save image: {str(e)}'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(user=request.user)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+
+class OrderListCreateAPIView(generics.ListCreateAPIView):
+    serializer_class = OrderSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return Order.objects.select_related(
+            'buyer', 'product', 'product__user', 'product__user__profile'
+        ).filter(
+            Q(buyer=self.request.user) | Q(product__user=self.request.user)
+        )
+
+    def perform_create(self, serializer):
+        product = serializer.validated_data['product']
+
+        if product.user == self.request.user:
+            raise serializers.ValidationError({
+                'detail': 'You cannot buy your own product.'
+            })
+
+        if product.orders.filter(status__in=[Order.STATUS_PENDING, Order.STATUS_SOLD]).exists():
+            raise serializers.ValidationError({
+                'detail': 'This product already has a pending or sold order.'
+            })
+
+        serializer.save()
+
+
+class OrderConfirmAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        order = get_object_or_404(Order, pk=pk)
+
+        if order.product.user != request.user:
+            return Response({'detail': 'Not authorized to confirm this order.'}, status=status.HTTP_403_FORBIDDEN)
+
+        if order.status != Order.STATUS_PENDING:
+            return Response(
+                {'detail': 'Only pending orders can be confirmed.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        order.status = Order.STATUS_SOLD
+        order.save(update_fields=['status', 'updated_at'])
+        serializer = OrderSerializer(order)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class ProductDetailAPIView(generics.RetrieveUpdateDestroyAPIView):
+    serializer_class = ProductSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return Product.objects.filter(user=self.request.user).select_related('user', 'user__profile')
+
+
+class MyProductsAPIView(generics.ListAPIView):
+    serializer_class = ProductSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return Product.objects.filter(user=self.request.user).select_related('user', 'user__profile')
+
+
+class CurrentUserAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        serializer = UserSerializer(request.user)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def patch(self, request):
+        user = request.user
+        profile, _ = UserProfile.objects.get_or_create(user=user)
+
+        first_name = request.data.get('first_name')
+        last_name = request.data.get('last_name')
+        email = request.data.get('email')
+        phone = request.data.get('phone')
+
+        if first_name is not None:
+            user.first_name = first_name
+        if last_name is not None:
+            user.last_name = last_name
+        if email is not None:
+            user.email = email
+        if phone is not None:
+            profile.phone = phone
+
+        user.save(update_fields=['first_name', 'last_name', 'email'])
+        profile.save(update_fields=['phone'])
+
+        serializer = UserSerializer(user)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+

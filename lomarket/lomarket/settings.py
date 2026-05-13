@@ -76,6 +76,10 @@ REST_FRAMEWORK = {
     ],
 }
 
+REST_AUTH_REGISTER_SERIALIZERS = {
+    'REGISTER_SERIALIZER': 'members.serializers.CustomRegisterSerializer',
+}
+
 MIDDLEWARE = (
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",
@@ -162,3 +166,11 @@ USE_TZ = True
 STATIC_URL = 'static/'
 
 LOGIN_REDIRECT_URL = '/'
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
+# Cloudflare domain for media URLs
+# This ensures media URLs are accessible from outside Docker
+API_DOMAIN = 'https://app.lomarket.id.vn'
+

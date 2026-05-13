@@ -1,5 +1,3 @@
-version: '3.9'
-
 services:
   db:
     image: mysql:8.0
@@ -24,6 +22,14 @@ services:
       - "8000:8000"
     depends_on:
       - db
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared_tunnel
+    restart: always
+    # Thay <YOUR_TUNNEL_TOKEN> bằng mã token bạn lấy trên trang Zero Trust
+    command: tunnel --no-autoupdate run --token eyJhIjoiOWMyMzg2ZTAzZjRmNzMzNzQxZTFlZjU4NjU0YWY2YTQiLCJ0IjoiYjE4ODJiMzEtZTNiZC00YTMwLTg1MjQtNGQ2YzRjNGUwOWE5IiwicyI6IlpHWTFPV0l5TlRJdE0ySmhNeTAwTVdRMExUaGxNMkl0WTJabE1qWmpOVFF4WWprMiJ9
+    depends_on:
+      - web
 
 volumes:
   mysql_data:
